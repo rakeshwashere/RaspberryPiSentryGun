@@ -1,5 +1,5 @@
 # USAGE
-# python real_time_object_detection.py --prototxt MobileNetSSD_deploy.prototxt.txt --model MobileNetSSD_deploy.caffemodel
+# python3 real_time_object_detection.py --prototxt MobileNetSSD_deploy.prototxt.txt --model MobileNetSSD_deploy.caffemodel
 
 # import the necessary packages
 from imutils.video import VideoStream
@@ -23,8 +23,10 @@ args = vars(ap.parse_args())
 # initialize the list of class labels MobileNet SSD was trained to
 # detect, then generate a set of bounding box colors for each class
 CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
-	"bottle", "bus", "car", "cat", "chair", "cow", "diningtable", "horse", "motorbike", "person", "pottedplant", "sheep",
+	"bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
+	"dog", "horse", "motorbike", "person", "pottedplant", "sheep",
 	"sofa", "train", "tvmonitor"]
+	
 COLORS = np.random.uniform(0, 255, size=(len(CLASSES), 3))
 
 # load our serialized model from disk
@@ -39,12 +41,49 @@ vs = VideoStream(src=0).start()
 time.sleep(2.0)
 fps = FPS().start()
 
+FRAME_WIDTH = 500
+FRAME_CENTERX = FRAME_CENTERY = int(FRAME_WIDTH/2)
+
+def get_person_center_coordinates(startX, startY, endX, endY):
+	centerX = (startX + endX)/2
+	centerY = (startY + endY)/2
+	return (centerX, centerY)
+
+def get_cross_hair_box_coordinates(frame_width):
+	frame_centerX = frame_centerY = frame_width/2
+
+	box_side_len = (frame_width * 0.30)/2
+
+	box_startX = int(frame_centerX - box_side_len)
+	box_endX = int(frame_centerX + box_side_len)
+	box_startY = int(frame_centerY - box_side_len)
+	box_endY = int(frame_centerY + box_side_len)
+
+	return [(box_startX,box_startY),(box_endX,box_endY)]
+
+def draw_cross_hair_box(cv2, frame, box_coordinates):
+	cv2.rectangle(frame,box_coordinates[0],box_coordinates[1],(0,0,255),1)
+	
+def should_fire(person_center_coordinates, cross_hair_box):
+	box_startX, box_startY = cross_hair_box[0]
+	box_endX, box_endY = cross_hair_box[1]
+
+	person_centerX, person_centerY = person_center_coordinates
+	
+	if box_startX > person_centerX or box_endX < person_centerX:
+    		return False
+	if box_startY > person_centerY or box_endY < person_centerY:
+    		return False
+	return True
+
+cross_hair_box_coordinates = get_cross_hair_box_coordinates(FRAME_WIDTH)
+
 # loop over the frames from the video stream
 while True:
 	# grab the frame from the threaded video stream and resize it
 	# to have a maximum width of 400 pixels
 	frame = vs.read()
-	frame = imutils.resize(frame, width=800)
+	frame = imutils.resize(frame, width=FRAME_WIDTH)
 
 	# grab the frame dimensions and convert it to a blob
 	(h, w) = frame.shape[:2]
@@ -73,14 +112,25 @@ while True:
 			(startX, startY, endX, endY) = box.astype("int")
 
 			# draw the prediction on the frame
+			object_detected = CLASSES[idx]
 			label = "{}: {:.2f}%".format(CLASSES[idx],
 				confidence * 100)
-			cv2.rectangle(frame, (startX, startY), (endX, endY),
-				COLORS[idx], 2)
-			y = startY - 15 if startY - 15 > 15 else startY + 15
-			cv2.putText(frame, label, (startX, y),
-				cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
 
+			if object_detected == "person":
+				person_center_coordinates = get_person_center_coordinates(startX, startY, endX, endY)
+
+				cv2.putText(frame, "Person detected", (10, 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
+				cv2.rectangle(frame, (startX, startY), (endX, endY), COLORS[idx], 2)
+
+				y = startY - 15 if startY - 15 > 15 else startY + 15
+				cv2.putText(frame, label, (startX, y),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)	
+
+				if should_fire(person_center_coordinates, cross_hair_box_coordinates):
+					cv2.putText(frame, "PHEW PHEW !!!", (FRAME_CENTERX - 30, FRAME_CENTERY), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 100,0) , 2)
+
+	draw_cross_hair_box(cv2, frame, cross_hair_box_coordinates)
+	
 	# show the output frame
 	cv2.imshow("Frame", frame)
 	key = cv2.waitKey(1) & 0xFF
