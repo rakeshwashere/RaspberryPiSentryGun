@@ -1,0 +1,1 @@
+pip3 install --target . --upgrade -r requirements.txt
