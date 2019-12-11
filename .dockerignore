@@ -1,0 +1,8 @@
+.git
+*.zip
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+Freenove*
+certs/**
