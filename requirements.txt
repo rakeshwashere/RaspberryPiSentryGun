@@ -1,2 +1,2 @@
 imutils==0.5.3
-numpy==1.17.4
+RPi.GPIO==0.7.0

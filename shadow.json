@@ -1,0 +1,10 @@
+{
+  "desired": {
+    "welcome": "aws-iot",
+    "gunStatus": "armed"
+  },
+  "reported": {
+    "welcome": "aws-iot",
+    "gunStatus": "armed"
+  }
+}

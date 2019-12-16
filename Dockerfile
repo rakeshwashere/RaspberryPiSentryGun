@@ -2,8 +2,8 @@ FROM sgtwilko/rpi-raspbian-opencv
 
 WORKDIR /SentryGun 
 
-RUN pip3 install RPi.GPIO
-
 COPY . .
+
+RUN sudo apt-get update && sudo pip3 install -r requirements.txt
 
 CMD ./activate.sh
