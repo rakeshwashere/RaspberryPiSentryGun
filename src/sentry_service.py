@@ -11,7 +11,6 @@ logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 class SentryService(threading.Thread):
 
     def __init__(self, task_queue):
-        # multiprocessing.Process.__init__(self)
         Thread.__init__(self)
         GPIO.setmode(GPIO.BOARD)
 
@@ -32,7 +31,6 @@ class SentryService(threading.Thread):
                 self.sentry_controller.shutdown()
                 break
             print('%s: %s' % (proc_name, current_task))
-            # self.task_queue.task_done()
         return
 
     def do(self, task):
