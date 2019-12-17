@@ -11,26 +11,13 @@ import os
 import cv2
 from sentry_controller import SentryController
 from sentry_service import SentryService, Task
+from shadowservice.sentry_shadow import SentryShadow
 import multiprocessing
 import RPi.GPIO as GPIO
 
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-disarmed = False
-
-# sentry_shadow = SentryShadow()
-# sentry_shadow.get_status()
-
-# def sentry_status_change_handler(status):
-#     global disarmed
-#     logging.info("Status change recognized in the sentry gun: " + status)
-#     if status == 'disarmed':
-#         logging.info('disarmed recieved from shadow service')
-#         disarmed = True
-#     elif status == 'armed':
-#         logging.info('armed recieved from shadow service')
-#         disarmed = False
-
+sentry_shadow = SentryShadow()
 
 sentry_tasks_queue = deque(maxlen=1)
 sentry_service = SentryService(sentry_tasks_queue)
@@ -99,7 +86,12 @@ def draw_cross_hair_box(cv2, frame, box_coordinates):
 
 
 def should_fire(person_center_coordinates, cross_hair_box):
-    global disarmed
+    arming = sentry_shadow.get_arming()
+
+    if arming != 'armed':
+        logging.info("Disarmed won't fire")
+        return False
+
     box_start_x, box_start_y = cross_hair_box[0]
     box_end_x, box_end_y = cross_hair_box[1]
 
@@ -108,11 +100,6 @@ def should_fire(person_center_coordinates, cross_hair_box):
     if box_start_x > person_center_x or box_end_x < person_center_x:
         return False
     if box_start_y > person_center_y or box_end_y < person_center_y:
-        return False
-
-    logging.info('the value of disarmed is ' + str(disarmed))
-    if disarmed:
-        logging.info("Disarmed won't fire")
         return False
 
     logging.info("PHEW PHEW PHEW")
@@ -198,7 +185,10 @@ while True:
         logging.info("Frame processed in: %s", time.time() - start_time)
 
     except Exception as ex: 
-        print("Exception caught: " + str(ex))
+        sentry_service.do(Task('SHUTDOWN'))
+        sentry_service.join()
+        # print("Exception caught: " + str(ex))
+        raise ex
 
 sentry_service.do(Task('SHUTDOWN'))
 sentry_service.join()
