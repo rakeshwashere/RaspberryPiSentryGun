@@ -12,13 +12,31 @@ import cv2
 from sentry_controller import SentryController
 from sentry_service import SentryService, Task
 from shadowservice.sentry_shadow import SentryShadow
+from greengrass_core.greengrass_core_finder import GreengrassCoreFinder
+from greengrass_core.cloudwatch.metrics_publisher import MetricsPublisher
+from greengrass_core.cloudwatch.sentry_gun_metrics_publisher import SentryGunMetricsPublisher
+
 import multiprocessing
 import RPi.GPIO as GPIO
-
+from iot_core.constants import IoTCoreConstants
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-sentry_shadow = SentryShadow()
+# discover greengrass core
+greengrass_core_finder = GreengrassCoreFinder(IoTCoreConstants.IOT_CORE_ENDPOINT,
+                     IoTCoreConstants.ROOT_CA,
+                     IoTCoreConstants.DEVICE_CERT,
+                     IoTCoreConstants.PRIVATE_KEY,
+                     IoTCoreConstants.THING_NAME)
 
+greengrass_core_finder.find_greengrass_core()
+core_mqtt_client = greengrass_core_finder.get_core_mqtt_client()
+
+
+# cloud watch 
+metrics_publisher = SentryGunMetricsPublisher(MetricsPublisher(core_mqtt_client, '/sentryguncw/put'))
+
+# shadow service
+sentry_shadow = SentryShadow()
 sentry_tasks_queue = deque(maxlen=1)
 sentry_service = SentryService(sentry_tasks_queue)
 sentry_service.daemon = True
@@ -148,6 +166,8 @@ while True:
                                              confidence * 100)
 
                 if object_detected == "person":
+                    metrics_publisher.publish_person_detection_event()
+
                     person_center_coordinates = get_person_center_coordinates(
                         startX, startY, endX, endY)
 
@@ -162,6 +182,8 @@ while True:
 
                     if should_fire(person_center_coordinates, cross_hair_box_coordinates):
                         sentry_service.do(Task('FIRE'))
+                        metrics_publisher.publish_fire_event()
+                        
                         cv2.putText(frame, "PHEW PHEW !!!", (FRAME_CENTER_X - 30,
                                                              FRAME_CENTER_Y), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                                     (255, 100, 0),
@@ -169,6 +191,7 @@ while True:
                     break
 
         draw_cross_hair_box(cv2, frame, cross_hair_box_coordinates)
+
 
         if HEADED:
             # show the output frame
@@ -178,13 +201,14 @@ while True:
             if key == ord("q"):
                 sentry_service.do(Task('SHUTDOWN'))
                 break
-        
+
         # update the FPS counter
         fps.update()
+        frame_processing_time_in_seconds = time.time() - start_time
+        metrics_publisher.publish_frame_processing_time(frame_processing_time_in_seconds)
+        logging.info("Frame processed in: %s", frame_processing_time_in_seconds)
 
-        logging.info("Frame processed in: %s", time.time() - start_time)
-
-    except Exception as ex: 
+    except Exception as ex:
         sentry_service.do(Task('SHUTDOWN'))
         sentry_service.join()
         # print("Exception caught: " + str(ex))
@@ -202,8 +226,3 @@ if HEADED:
 vs.stop()
 logging.info(" elapsed time: {:.2f}".format(fps.elapsed()))
 logging.info(" approx. FPS: {:.2f}".format(fps.fps()))
-
-
-
-
-
