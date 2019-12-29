@@ -7,14 +7,14 @@ from threading import Thread
 import imutils
 import logging
 import time
+import json
 import os
 import cv2
-from sentry_controller import SentryController
-from sentry_service import SentryService, Task
 from shadowservice.sentry_shadow import SentryShadow
 from greengrass_core.greengrass_core_finder import GreengrassCoreFinder
 from greengrass_core.cloudwatch.metrics_publisher import MetricsPublisher
 from greengrass_core.cloudwatch.sentry_gun_metrics_publisher import SentryGunMetricsPublisher
+from sentry_service_client import SentryServiceClient
 
 import multiprocessing
 import RPi.GPIO as GPIO
@@ -37,10 +37,9 @@ metrics_publisher = SentryGunMetricsPublisher(MetricsPublisher(core_mqtt_client,
 
 # shadow service
 sentry_shadow = SentryShadow()
-sentry_tasks_queue = deque(maxlen=1)
-sentry_service = SentryService(sentry_tasks_queue)
-sentry_service.daemon = True
-sentry_service.start()
+
+#sentry client
+sentry_service_client = SentryServiceClient('OBJECT_DETECTOR')
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -78,12 +77,10 @@ HEADED = True if os.getenv('DISPLAY') else False
 FRAME_WIDTH = 500
 FRAME_CENTER_X = FRAME_CENTER_Y = int(FRAME_WIDTH / 2)
 
-
 def get_person_center_coordinates(start_x, start_y, end_x, end_y):
     center_x = (start_x + end_x) / 2
     center_y = (start_y + end_y) / 2
     return center_x, center_y
-
 
 def get_cross_hair_box_coordinates(frame_width):
     frame_centerX = frame_centerY = frame_width / 2
@@ -97,11 +94,9 @@ def get_cross_hair_box_coordinates(frame_width):
 
     return [(box_startX, box_startY), (box_endX, box_endY)]
 
-
 def draw_cross_hair_box(cv2, frame, box_coordinates):
     cv2.rectangle(frame, box_coordinates[0],
                   box_coordinates[1], (0, 0, 255), 1)
-
 
 def should_fire(person_center_coordinates, cross_hair_box):
     arming = sentry_shadow.get_arming()
@@ -130,6 +125,9 @@ cross_hair_box_coordinates = get_cross_hair_box_coordinates(FRAME_WIDTH)
 while True:
     try:
         start_time = time.time()
+
+        sentry_service_client.fire()
+
         # grab the frame from the threaded video stream and resize it
         frame = vs.read()
         frame = imutils.resize(frame, width=FRAME_WIDTH)
@@ -149,7 +147,6 @@ while True:
             # the prediction
             confidence = detections[0, 0, i, 2]
 
-            # sentry_controller.fire()
             # filter out weak detections by ensuring the `confidence` is
             # greater than the minimum confidence
             if confidence > args["confidence"]:
@@ -181,7 +178,6 @@ while True:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
 
                     if should_fire(person_center_coordinates, cross_hair_box_coordinates):
-                        sentry_service.do(Task('FIRE'))
                         metrics_publisher.publish_fire_event()
                         
                         cv2.putText(frame, "PHEW PHEW !!!", (FRAME_CENTER_X - 30,
@@ -199,7 +195,6 @@ while True:
             key = cv2.waitKey(1) & 0xFF
             # if the `q` key was pressed, break from the loop
             if key == ord("q"):
-                sentry_service.do(Task('SHUTDOWN'))
                 break
 
         # update the FPS counter
@@ -209,16 +204,9 @@ while True:
         logging.info("Frame processed in: %s", frame_processing_time_in_seconds)
 
     except Exception as ex:
-        sentry_service.do(Task('SHUTDOWN'))
-        sentry_service.join()
-        # print("Exception caught: " + str(ex))
         raise ex
 
-sentry_service.do(Task('SHUTDOWN'))
-sentry_service.join()
-# stop the timer and display FPS information
 fps.stop()
-GPIO.cleanup()
 
 if HEADED:
     # do a bit of cleanup

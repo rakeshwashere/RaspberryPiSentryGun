@@ -5,37 +5,60 @@ import RPi.GPIO as GPIO
 import logging
 import time
 from sentry_controller import SentryController
+import socket
+import os
+import os.path
+import time
+import json
+import signal
+import sys
 
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-class SentryService(threading.Thread):
+GPIO.setmode(GPIO.BOARD)
+sentry_controller = SentryController()
 
-    def __init__(self, task_queue):
-        Thread.__init__(self)
-        GPIO.setmode(GPIO.BOARD)
+# handle termination gracefully
+def sigterm_handler(signum, frame):
+    logging.info("Signal to terminate received")
+    shutdown_sentry_service()
 
-        self.sentry_controller = SentryController()
-        self.task_queue = task_queue
+signal.signal(signal.SIGTERM, sigterm_handler)
 
-    def run(self):
-        proc_name = self.name
-        while True:
-            if len(self.task_queue) == 0:
-                continue
-            current_task = self.task_queue.pop()
-            if current_task.operation == 'FIRE':
-                print("fire in the hole !!!")
-                self.sentry_controller.fire()
-            elif current_task.operation == 'SHUTDOWN':
-                print("Shutting down!!!")
-                self.sentry_controller.shutdown()
-                break
-            print('%s: %s' % (proc_name, current_task))
-        return
+if os.path.exists("/tmp/sentry_service_unix_socket"):
+    os.remove("/tmp/sentry_service_unix_socket")
 
-    def do(self, task):
-        self.task_queue.append(task)
+logging.info("Opening socket...")
 
+server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+server.bind("/tmp/sentry_service_unix_socket")
+
+last_execution_time = 0
+
+def shutdown_sentry_service():
+    sentry_controller.shutdown()
+    server.close()
+    os.remove("/tmp/sentry_service_unix_socket")
+    logging.info("Shutdown sentry controller, cleaned up, Shutting down...")
+    sys.exit()
+
+logging.info("Listening...")
+while True:
+    datagram = server.recv(1024)
+    datagram = datagram.decode('utf-8')
+    logging.info("recevied message from client %s", datagram)
+
+    message = json.loads(datagram)
+
+    if not datagram:
+        break
+    elif "FIRE" == message['command'] and message['timestamp'] >  (last_execution_time + 3.8): 
+        last_execution_time = time.time()
+        logging.info("matched fire again for command sent at %s", message['timestamp'])
+        sentry_controller.fire()
+    else:
+        if "SHUTDOWN" == message['command']:
+            shutdown_sentry_service()
 
 class Task(object):
     def __init__(self, operation):
