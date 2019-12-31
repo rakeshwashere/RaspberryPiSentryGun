@@ -7,3 +7,5 @@ Freenove*
 certs/**
 .vscode
 .idea
+groupCA
+node_modules
