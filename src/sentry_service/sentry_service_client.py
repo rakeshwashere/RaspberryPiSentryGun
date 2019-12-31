@@ -26,6 +26,12 @@ class SentryServiceClient:
         message['command'] = 'FIRE'
         self.__client.send(json.dumps(message).encode('utf-8'))
     
+    def pan(self, angle):
+        message = self.__generate_basic_message()
+        message['command'] = 'PAN'
+        message['angle'] = angle
+        self.__client.send(json.dumps(message).encode('utf-8'))
+
     def shutdown(self):
         message = self.__generate_basic_message()
         message['command'] = 'SHUTDOWN'

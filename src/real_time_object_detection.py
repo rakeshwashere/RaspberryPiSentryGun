@@ -4,22 +4,30 @@ import numpy as np
 from collections import deque
 import argparse
 from threading import Thread
+import threading
 import imutils
 import logging
 import time
 import json
 import os
 import cv2
+import zmq
+import base64
 from shadowservice.sentry_shadow import SentryShadow
 from greengrass_core.greengrass_core_finder import GreengrassCoreFinder
 from greengrass_core.cloudwatch.metrics_publisher import MetricsPublisher
 from greengrass_core.cloudwatch.sentry_gun_metrics_publisher import SentryGunMetricsPublisher
-from sentry_service_client import SentryServiceClient
+from sentry_service import SentryServiceClient
+from object_tracking import PanCalculator
+from stream import VideoStreamer
 
 import multiprocessing
 import RPi.GPIO as GPIO
 from iot_core.constants import IoTCoreConstants
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
+
+FRAME_WIDTH = 800
+FRAME_CENTER_X = FRAME_CENTER_Y = int(FRAME_WIDTH / 2)
 
 # discover greengrass core
 greengrass_core_finder = GreengrassCoreFinder(IoTCoreConstants.IOT_CORE_ENDPOINT,
@@ -31,7 +39,6 @@ greengrass_core_finder = GreengrassCoreFinder(IoTCoreConstants.IOT_CORE_ENDPOINT
 greengrass_core_finder.find_greengrass_core()
 core_mqtt_client = greengrass_core_finder.get_core_mqtt_client()
 
-
 # cloud watch 
 metrics_publisher = SentryGunMetricsPublisher(MetricsPublisher(core_mqtt_client, '/sentryguncw/put'))
 
@@ -40,6 +47,23 @@ sentry_shadow = SentryShadow()
 
 #sentry client
 sentry_service_client = SentryServiceClient('OBJECT_DETECTOR')
+
+# camera positioning 
+# recenter camera always
+def recenter_sentry_camera():
+    sentry_service_client.pan(90.0)
+
+recenter_camera_thread = threading.Timer(0.0, recenter_sentry_camera)
+recenter_camera_thread.start()
+
+current_camera_angle = 90.0
+pan_calculator = PanCalculator(60.0, FRAME_WIDTH)
+last_pan_time = 0
+
+#video steamer
+context = zmq.Context()
+footage_socket = context.socket(zmq.PUB)
+footage_socket.bind('tcp://*:5556')
 
 # construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
@@ -73,9 +97,6 @@ time.sleep(2.0)
 fps = FPS().start()
 
 HEADED = True if os.getenv('DISPLAY') else False
-
-FRAME_WIDTH = 500
-FRAME_CENTER_X = FRAME_CENTER_Y = int(FRAME_WIDTH / 2)
 
 def get_person_center_coordinates(start_x, start_y, end_x, end_y):
     center_x = (start_x + end_x) / 2
@@ -126,8 +147,6 @@ while True:
     try:
         start_time = time.time()
 
-        sentry_service_client.fire()
-
         # grab the frame from the threaded video stream and resize it
         frame = vs.read()
         frame = imutils.resize(frame, width=FRAME_WIDTH)
@@ -163,6 +182,8 @@ while True:
                                              confidence * 100)
 
                 if object_detected == "person":
+                    recenter_camera_thread.cancel()
+
                     metrics_publisher.publish_person_detection_event()
 
                     person_center_coordinates = get_person_center_coordinates(
@@ -178,16 +199,37 @@ while True:
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
 
                     if should_fire(person_center_coordinates, cross_hair_box_coordinates):
+                        sentry_service_client.fire()
                         metrics_publisher.publish_fire_event()
-                        
+                    
                         cv2.putText(frame, "PHEW PHEW !!!", (FRAME_CENTER_X - 30,
                                                              FRAME_CENTER_Y), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                                     (255, 100, 0),
                                     2)
+                
+                    # if cannot fire atleast position camera to have person in the center
+                    person_center_x, person_center_y = person_center_coordinates
+                    pan_to_angle = current_camera_angle + pan_calculator.calculate_pan_angle(person_center_x)
+                    if pan_to_angle <= 0:
+                        pan_to_angle = 0
+                    elif pan_to_angle >= 180:
+                        pan_to_angle = 180
+                    logging.info("current angle : {} and pan to angle : {}".format(current_camera_angle, pan_to_angle))
+                    if abs(current_camera_angle - pan_to_angle) > 0:
+                        current_time = time.time()
+                        if (last_pan_time + 1.0) < current_time:
+                            
+                            sentry_service_client.pan(pan_to_angle)
+                            time.sleep(0.2)
+                            last_pan_time = current_time
+                            current_camera_angle = pan_to_angle
+
+                    recenter_camera_thread = threading.Timer(5.0, recenter_sentry_camera)
+                    recenter_camera_thread.start()
+
                     break
 
         draw_cross_hair_box(cv2, frame, cross_hair_box_coordinates)
-
 
         if HEADED:
             # show the output frame
@@ -196,6 +238,11 @@ while True:
             # if the `q` key was pressed, break from the loop
             if key == ord("q"):
                 break
+        
+        #publish image to topic
+        encoded, buffer = cv2.imencode('.jpg', frame)
+        jpg_as_text = base64.b64encode(buffer)
+        footage_socket.send(jpg_as_text)
 
         # update the FPS counter
         fps.update()
@@ -205,7 +252,6 @@ while True:
 
     except Exception as ex:
         raise ex
-
 fps.stop()
 
 if HEADED:

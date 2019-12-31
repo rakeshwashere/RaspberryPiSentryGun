@@ -4,7 +4,7 @@ from threading import Thread
 import RPi.GPIO as GPIO
 import logging
 import time
-from sentry_controller import SentryController
+from sentry_service import SentryController
 import socket
 import os
 import os.path
@@ -33,7 +33,7 @@ logging.info("Opening socket...")
 server = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
 server.bind("/tmp/sentry_service_unix_socket")
 
-last_execution_time = 0
+last_fire_time = 0
 
 def shutdown_sentry_service():
     sentry_controller.shutdown()
@@ -52,10 +52,14 @@ while True:
 
     if not datagram:
         break
-    elif "FIRE" == message['command'] and message['timestamp'] >  (last_execution_time + 3.8): 
-        last_execution_time = time.time()
+    elif "FIRE" == message['command'] and message['timestamp'] >  (last_fire_time + 3.8): 
+        last_fire_time = time.time()
         logging.info("matched fire again for command sent at %s", message['timestamp'])
         sentry_controller.fire()
+    elif "PAN" == message['command']:
+        pan_angle = message['angle']
+        logging.info("Panning to angle: {}".format(pan_angle))
+        sentry_controller.pan(pan_angle)
     else:
         if "SHUTDOWN" == message['command']:
             shutdown_sentry_service()

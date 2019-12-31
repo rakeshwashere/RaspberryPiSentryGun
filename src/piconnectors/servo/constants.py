@@ -8,4 +8,5 @@ class ServoConstants:
     PWM_FREQUENCY = 50
     POWER_PIN = 12
     TRIGGER_PIN = 36
+    PAN_PIN = 38
 
