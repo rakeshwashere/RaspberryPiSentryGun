@@ -24,3 +24,12 @@ class SentryShadow:
 
     def get_mode(self):
         return self.sentry_gun_shadow.get_state().get('mode')
+    
+    def set_mode(self, mode):
+        self.sentry_gun_shadow.update_state({'mode': mode})
+    
+    def set_autonomous_mode(self):
+        self.set_mode('AUTONOMOUS')
+    
+    def set_manual_mode(self):
+        self.set_mode('MANUAL')

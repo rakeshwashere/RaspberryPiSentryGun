@@ -50,13 +50,16 @@ sentry_service_client = SentryServiceClient('OBJECT_DETECTOR')
 
 # camera positioning 
 # recenter camera always
+current_camera_angle = 90.0
+
 def recenter_sentry_camera():
     sentry_service_client.pan(90.0)
+    current_camera_angle = 90.0
 
 recenter_camera_thread = threading.Timer(0.0, recenter_sentry_camera)
 recenter_camera_thread.start()
 
-current_camera_angle = 90.0
+
 pan_calculator = PanCalculator(60.0, FRAME_WIDTH)
 last_pan_time = 0
 
@@ -106,12 +109,18 @@ def get_person_center_coordinates(start_x, start_y, end_x, end_y):
 def get_cross_hair_box_coordinates(frame_width):
     frame_centerX = frame_centerY = frame_width / 2
 
+    # logging.info("The frame width is : {}".format( frame_width))
+
     box_side_len = (frame_width * 0.30) / 2
+
+    # logging.info("The box length is : {}".format( box_side_len))
 
     box_startX = int(frame_centerX - box_side_len)
     box_endX = int(frame_centerX + box_side_len)
     box_startY = int(frame_centerY - box_side_len)
     box_endY = int(frame_centerY + box_side_len)
+
+    # logging.info("start x , y : ({}, {}) end x , y: ({}, {})".format(box_startX,box_startY, box_endX, box_endY ))
 
     return [(box_startX, box_startY), (box_endX, box_endY)]
 
@@ -145,11 +154,19 @@ cross_hair_box_coordinates = get_cross_hair_box_coordinates(FRAME_WIDTH)
 # loop over the frames from the video stream
 while True:
     try:
+        if sentry_shadow.get_mode() == "MANUAL":
+            recenter_camera_thread.cancel()
+        
         start_time = time.time()
 
         # grab the frame from the threaded video stream and resize it
         frame = vs.read()
         frame = imutils.resize(frame, width=FRAME_WIDTH)
+
+        #inlude the mode in the frame 
+        senty_mode_text = "Mode: {}".format(sentry_shadow.get_mode())
+        cv2.putText(frame, senty_mode_text,(FRAME_WIDTH - 300, 30),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         # grab the frame dimensions and convert it to a blob
         (h, w) = frame.shape[:2]
@@ -197,7 +214,17 @@ while True:
                     y = startY - 15 if startY - 15 > 15 else startY + 15
                     cv2.putText(frame, label, (startX, y),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
+                    
+                    
+                    
+                    # cv2.putText(frame, senty_mode_text, (FRAME_WIDTH-40, 10),
+                    #             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+                    #if everything is autonomous dont do anything
+                    if sentry_shadow.get_mode() == 'MANUAL':
+                        logging.info("Manual mode skipping any decision making")
+                        break
+                    
                     if should_fire(person_center_coordinates, cross_hair_box_coordinates):
                         sentry_service_client.fire()
                         metrics_publisher.publish_fire_event()
@@ -206,7 +233,7 @@ while True:
                                                              FRAME_CENTER_Y), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                                     (255, 100, 0),
                                     2)
-                
+    
                     # if cannot fire atleast position camera to have person in the center
                     person_center_x, person_center_y = person_center_coordinates
                     pan_to_angle = current_camera_angle + pan_calculator.calculate_pan_angle(person_center_x)
@@ -215,7 +242,7 @@ while True:
                     elif pan_to_angle >= 180:
                         pan_to_angle = 180
                     logging.info("current angle : {} and pan to angle : {}".format(current_camera_angle, pan_to_angle))
-                    if abs(current_camera_angle - pan_to_angle) > 0:
+                    if abs(current_camera_angle - pan_to_angle) > 1:
                         current_time = time.time()
                         if (last_pan_time + 1.0) < current_time:
                             
@@ -226,7 +253,6 @@ while True:
 
                     recenter_camera_thread = threading.Timer(5.0, recenter_sentry_camera)
                     recenter_camera_thread.start()
-
                     break
 
         draw_cross_hair_box(cv2, frame, cross_hair_box_coordinates)

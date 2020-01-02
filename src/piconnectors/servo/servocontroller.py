@@ -22,7 +22,7 @@ class ServoController:
             pin, ServoConstants.PWM_FREQUENCY)  # set Frequency
         self.servo.start(0)
 
-    def __rest_servo(self):
+    def rest_servo(self):
         self.servo.start(0)
 
     def set_angle(self, angle, **kwargs):  # make the servo rotate to specific angle (0-180 degrees)
@@ -38,16 +38,17 @@ class ServoController:
             map_angle_to_cycle(angle, 0, 180, ServoConstants.SERVO_MIN_DUTY, ServoConstants.SERVO_MAX_DUTY))
 
         sleep_for = kwargs.get('sleep_for', None)
-
+        reset_servo = kwargs.get('reset_servo', True)
         if not sleep_for:
             wait_for_servo_to_move(angle)
         else:
             time.sleep(sleep_for)
-
-        self.__rest_servo() # hack to stop servo jitter
+        
+        if reset_servo:
+            self.rest_servo() # hack to stop servo jitter
         # TODO set sleep time based on angle of rotation
 
     def stop(self):
-        self.__rest_servo()
+        self.rest_servo()
     def destroy(self):
         self.servo.stop()

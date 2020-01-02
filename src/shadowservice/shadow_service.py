@@ -68,5 +68,11 @@ class ShadowService:
         self.device_shadow.shadowUpdate(payload, None, 5)
         print("Acknolwedged state")
 
+    def update_state(self, new_state):
+        payload = '{"state":{"desired":' + \
+            json.dumps(new_state) + '}}'
+        self.device_shadow.shadowUpdate(payload, None, 5)
+        print("Shadow update request sent")
+
     def get_state(self):
         return self.state

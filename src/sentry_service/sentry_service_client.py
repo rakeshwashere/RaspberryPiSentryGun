@@ -28,7 +28,19 @@ class SentryServiceClient:
     
     def pan(self, angle):
         message = self.__generate_basic_message()
-        message['command'] = 'PAN'
+        message['command'] = 'SET_PAN_ANGLE'
+        message['angle'] = angle
+        self.__client.send(json.dumps(message).encode('utf-8'))
+
+    def pan_right(self, angle):
+        message = self.__generate_basic_message()
+        message['command'] = 'PAN_RIGHT'
+        message['angle'] = angle
+        self.__client.send(json.dumps(message).encode('utf-8'))
+    
+    def pan_left(self, angle):
+        message = self.__generate_basic_message()
+        message['command'] = 'PAN_LEFT'
         message['angle'] = angle
         self.__client.send(json.dumps(message).encode('utf-8'))
 
